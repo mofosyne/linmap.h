@@ -1,0 +1,9 @@
+{
+  "name": "linmap.h",
+  "version": "0.0.1",
+  "repo": "mofosyne/linmap.h",
+  "description": "Lightweight C utility library macros and functions for Linear Mapping and interpolation (e.g. ADC Conversion)",
+  "keywords": ["adc", "math", "macros", "interpolation", "digits"],
+  "license": "MIT",
+  "src": ["linmap.h", "adc_linmap.h"]
+}
