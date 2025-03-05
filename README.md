@@ -8,3 +8,5 @@
 Lightweight Linear Mapping Library (e.g. ADC Conversion)
 
 linmap.h is a header-only C library that provides a way to map numerical values from one range to another. 
+
+Check out the example output in [here](./linmap-adc-example-output.md)
