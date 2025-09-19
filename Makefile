@@ -32,13 +32,16 @@ format:
 example: example.c linmap.h
 	$(CC) $(CFLAGS) $(LDFLAGS) -o example example.c
 
-output/example.md: example
+output/:
+	mkdir output
+
+output/example.md: example output/
 	./example | tee ./output/example.md
 
 example-avr.elf: example-avr.c linmap.h
 	avr-gcc -mmcu=atmega328p -Os -std=c99 -DF_CPU=16000000UL -Wl,-u,vfprintf -lprintf_flt -lm -o example-avr.elf example-avr.c
 
-output/example-avr.md: example-avr.elf
+output/example-avr.md: example-avr.elf output/
 	simavr -m atmega328p -f 16000000 --no-color ./example-avr.elf 2>&1 >/dev/null | sed -r "s/\x1B\[[0-9;]*[mK]//g" | sed -r "s/\.\.\$$//" | tee ./output/example-avr.md
 
 .PHONY:
@@ -47,5 +50,5 @@ output/example-avr.md: example-avr.elf
 
 .PHONY:
 clean:
-	$(RM) test
 	$(RM) example
+	$(RM) example-avr.elf

@@ -24,4 +24,4 @@ jobs:
 
       - name: Run make example
         run: |
-          make example example-avr
+          make example example-avr.elf output/example.md output/example-avr.md
