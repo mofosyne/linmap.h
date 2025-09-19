@@ -42,37 +42,49 @@ int main(void)
     stdout = &uart_output; // redirect printf to UART
     uart_init();
 
+    printf("## Linear Conversion (AVR 8-bit e.g. atmega328p)\n\n");
+    printf("| ADC | Millivolt | ADC back | error |\n");
+    printf("|-----|-----------|----------|-------|\n");
+    for (int i = 0; i <= (1 << ADC_BIT_COUNT); i += 64)                                                                                                                     \
+    {
+        uint8_t adc_val = (int)i;
+        uint8_t millivolt_int = ADC_MILLIVOLT_FROM_VAL(ADC_BIT_COUNT, MILLI_VOLT_REFERENCE, adc_val);
+        uint8_t adc_from_mv_int = ADC_VAL_FROM_MILLIVOLT(ADC_BIT_COUNT, MILLI_VOLT_REFERENCE, millivolt_int);
+        int error = (int)adc_from_mv_int - (int)adc_val;
+        printf("| %3u | %9u | %8u | %5d |\n", adc_val, millivolt_int, adc_from_mv_int, error);
+    }
+    printf("\n\n");
+
     printf("## Fixed Linear Conversion (AVR 8-bit e.g. atmega328p)\n\n");
     printf("| ADC | Millivolt | ADC back | error |\n");
     printf("|-----|-----------|----------|-------|\n");
-
-    for (int i = 0; i < SAMPLE_COUNT; i++)
+    for (int i = 0; i <= (1 << ADC_BIT_COUNT); i += 64)                                                                                                                     \
     {
-        uint8_t adc_val = i * (1 << (ADC_BIT_COUNT - 4));
-        uint16_t mv = ADC_MILLIVOLT_FROM_VAL_FIXED_POINT(SCALING_FACTOR, ADC_BIT_COUNT, MILLI_VOLT_REFERENCE, adc_val);
-        uint8_t adc_back = ADC_VAL_FROM_MILLIVOLT_FIXED_POINT(SCALING_FACTOR, ADC_BIT_COUNT, MILLI_VOLT_REFERENCE, mv);
-        int8_t error = (int16_t)adc_back - (int16_t)adc_val;
-
-        printf("| %3u | %9u | %8u | %5d |\n", adc_val, mv, adc_back, error);
+        uint8_t adc_val = (int)i;
+        uint8_t millivolt_fixed = ADC_MILLIVOLT_FROM_VAL_FIXED_POINT(SCALING_FACTOR, ADC_BIT_COUNT, MILLI_VOLT_REFERENCE, adc_val);
+        uint8_t adc_from_mv_fixed = ADC_VAL_FROM_MILLIVOLT_FIXED_POINT(SCALING_FACTOR, ADC_BIT_COUNT, MILLI_VOLT_REFERENCE, millivolt_fixed);
+        int error = (int)adc_from_mv_fixed - (int)adc_val;
+        printf("| %3u | %9u | %8u | %5d |\n", adc_val, millivolt_fixed, adc_from_mv_fixed, error);
     }
     printf("\n\n");
 
     printf("## Floating Linear Conversion (AVR 32-bit Soft Float float e.g. atmega328p)\n\n");
     printf("### ADC Value --> Millivolt --> ADC Value \n\n");
-    printf("| ADC Value | Millivolts (float) | ADC From mV (int) | error  |\n");
-    printf("|-----------|--------------------|-------------------|--------|\n");
-    for (uint16_t adc_val = 0; adc_val <= (1 << ADC_BIT_COUNT); adc_val += 64)
+    printf("| ADC Value  | Millivolts (float) | ADC From mV (int) | error  |\n");
+    printf("|------------|--------------------|-------------------|--------|\n");
+    for (int i = 0; i <= (1 << ADC_BIT_COUNT); i += 64)
     {
+        float adc_val = (float)i;
         float millivolt_float = ADC_MILLIVOLT_FROM_VAL(ADC_BIT_COUNT, (float)MILLI_VOLT_REFERENCE, (float)adc_val);
         uint16_t adc_from_mv_int = ADC_VAL_FROM_MILLIVOLT(ADC_BIT_COUNT, MILLI_VOLT_REFERENCE, millivolt_float);
-        printf("| %9u | %15.2f mV | %17u | %6d |\n", adc_val, millivolt_float, adc_from_mv_int, adc_from_mv_int - adc_val);
+        printf("| %10f | %15.2f mV | %17u | %6d |\n", adc_val, millivolt_float, adc_from_mv_int, adc_from_mv_int - adc_val);
     }
     printf("\n\n");
 
     printf("### Millivolt --> ADC Value --> Millivolt \n\n");
     printf("| MV Value | ADC From mV (int) | Millivolts (float) | error  |\n");
     printf("|----------|-------------------|--------------------|--------|\n");
-    for (uint16_t mv_val = 0; mv_val <= MILLI_VOLT_REFERENCE; mv_val += 100)
+    for (int mv_val = 0; mv_val <= MILLI_VOLT_REFERENCE; mv_val += 100)
     {
         uint16_t adc_from_mv_int = ADC_VAL_FROM_MILLIVOLT(ADC_BIT_COUNT, MILLI_VOLT_REFERENCE, mv_val);
         float millivolt_float = ADC_MILLIVOLT_FROM_VAL(ADC_BIT_COUNT, (float)MILLI_VOLT_REFERENCE, (float)adc_from_mv_int);
