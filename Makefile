@@ -10,7 +10,7 @@ CFLAGS += -Wall -std=c99 -pedantic
 #CFLAGS += -Wall -std=c11 -pedantic
 
 .PHONY:
-all: example
+all: test example
 
 .PHONY: readme_update
 readme_update: output/example.md output/example-avr.md
@@ -28,6 +28,11 @@ format:
 	# pip install clang-format
 	clang-format -i *.c
 	clang-format -i *.h
+
+.PHONY: test
+test: test.c linmap.h adc_linmap.h
+	$(CC) $(CFLAGS) $(LDFLAGS) -o test_linmap test.c
+	./test_linmap
 
 example: example.c linmap.h
 	$(CC) $(CFLAGS) $(LDFLAGS) -o example example.c
@@ -50,5 +55,6 @@ output/example-avr.md: example-avr.elf output/
 
 .PHONY:
 clean:
+	$(RM) test_linmap
 	$(RM) example
 	$(RM) example-avr.elf
