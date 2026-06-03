@@ -29,12 +29,16 @@
 #ifndef LINMAP_H
 #define LINMAP_H
 
-// This is the linear conversion macros
+// On platforms where sizeof(int)==2 (e.g. AVR), intermediate products like
+// (X-X1)*(Y2-Y1) can overflow 16-bit int for typical ADC/mV ranges.
+// Use int32_t or long literals for at least one operand to force promotion:
+//   LINMAP_X_TO_Y(0, 0L, 1023, 3300L, adc_val)
 #define LINMAP_X_TO_Y(X1, Y1, X2, Y2, X) ((Y1) + (((X) - (X1)) * ((Y2) - (Y1))) / ((X2) - (X1)))
 #define LINMAP_Y_TO_X(X1, Y1, X2, Y2, Y) ((X1) + (((Y) - (Y1)) * ((X2) - (X1))) / ((Y2) - (Y1)))
 
-// This uses left shift (Akin to scaling down via multiplication) to temporarily convert the integer division into fixed integer arithmetic operation
-// before using right shift (Akin to scaling upward via division) to convert from fixed notation back to the original scale but with better precision
+// Fixed-point versions improve integer division precision via pre-scaling.
+// SCALE must be chosen so (X-X1)*(Y2-Y1) << SCALE fits in the argument type.
+// For 10-bit ADC + 3300 mV with int32_t: max safe SCALE=8 (product<<8 = 864M < INT32_MAX).
 // Reference: https://en.wikipedia.org/wiki/Fixed-point_arithmetic
 #define LINMAP_X_TO_Y_FIXED_POINT(SCALE, X1, Y1, X2, Y2, X) ((((Y1) << (SCALE)) + ((((X) - (X1)) * ((Y2) - (Y1))) << (SCALE)) / ((X2) - (X1))) >> (SCALE))
 #define LINMAP_Y_TO_X_FIXED_POINT(SCALE, X1, Y1, X2, Y2, Y) ((((X1) << (SCALE)) + ((((Y) - (Y1)) * ((X2) - (X1))) << (SCALE)) / ((Y2) - (Y1))) >> (SCALE))
