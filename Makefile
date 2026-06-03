@@ -48,6 +48,15 @@ output/example-avr.md: example-avr.elf output/
 %.o: %.c
 	$(CC) $(DEP_FLAG) $(CFLAGS) $(LDFLAGS) -o $@ -c $<
 
+.PHONY: test
+test: output/example-avr.md
+	@if grep -q "^FAIL:" output/example-avr.md; then \
+		echo "AVR unit tests FAILED:"; \
+		grep "^FAIL:" output/example-avr.md; \
+		exit 1; \
+	fi
+	@echo "All AVR unit tests passed."
+
 .PHONY:
 clean:
 	$(RM) example

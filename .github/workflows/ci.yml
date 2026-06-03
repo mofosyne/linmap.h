@@ -22,6 +22,9 @@ jobs:
           sudo apt-get install -y build-essential
           sudo apt-get install -y gcc-avr avr-libc simavr gdb-avr
 
-      - name: Run make example
+      - name: Build
         run: |
           make example example-avr.elf output/example.md output/example-avr.md
+
+      - name: Run AVR unit tests
+        run: make test
