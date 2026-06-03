@@ -2,10 +2,11 @@
  * example-avr.c
  * AVR unit tests for linmap - run under simavr
  *
- * Outputs "PASS: ..." or "FAIL: ..." lines so CI can detect regressions.
+ * Uses simavr's command-register mechanism (SIMAVR_CMD_EXIT_CODE_0/1) so
+ * simavr exits with code 0 on pass or 1 on failure.  CI can check $? directly.
  *
  * Key bugs exposed by this test on AVR (sizeof(int)==2):
- *  - Plain int overflow: (512 * 3300) = 1,687,200 overflows int16_t.
+ *  - Plain int overflow: (512 * 3300) = 1,689,600 overflows int16_t.
  *    Fix: use int32_t/long literals, e.g. LINMAP_X_TO_Y(0, 0L, 1023, 3300L, x).
  *  - Fixed-point overflow at SCALE=10: (1023 * 3300) << 10 = 3,456,921,600
  *    exceeds INT32_MAX. Use SCALE<=8 for 10-bit ADC + 3300 mV, or widen to uint32_t.
@@ -13,10 +14,14 @@
 
 #include "adc_linmap.h"
 #include "linmap.h"
+#include "simavr_cmd.h"
 #include <avr/io.h>
 #include <avr/sleep.h>
 #include <stdint.h>
 #include <stdio.h>
+
+/* Declare GPIOR0 as the simavr command bridge (unused general-purpose IO reg) */
+SIMAVR_DECLARE_CMD_REG(&GPIOR0);
 
 /* 10-bit ADC, 3.3 V reference (matches desktop example) */
 #define ADC_BIT_COUNT   10
@@ -128,7 +133,10 @@ int main(void)
 
     printf("\n## Summary: %d failure(s)\n", failures);
 
-    /* Halts the simulator cleanly (interrupts-off sleep is simavr's exit) */
+    /* Signal pass/fail to simavr via the command register, then halt.
+     * simavr exits with code 0 (EXIT_CODE_0) or 1 (EXIT_CODE_1) immediately
+     * on the register write; sleep_cpu() is the fallback for older simavr. */
+    GPIOR0 = failures ? SIMAVR_CMD_EXIT_CODE_1 : SIMAVR_CMD_EXIT_CODE_0;
     sleep_cpu();
     return 0;
 }

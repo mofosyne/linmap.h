@@ -38,24 +38,25 @@ output/:
 output/example.md: example output/
 	./example | tee ./output/example.md
 
-example-avr.elf: example-avr.c linmap.h
+example-avr.elf: example-avr.c linmap.h simavr_cmd.h
 	avr-gcc -mmcu=atmega328p -Os -std=c99 -DF_CPU=16000000UL -Wl,-u,vfprintf -lprintf_flt -lm -o example-avr.elf example-avr.c
 
 output/example-avr.md: example-avr.elf output/
-	simavr -m atmega328p -f 16000000 --no-color ./example-avr.elf 2>&1 >/dev/null | sed -r "s/\x1B\[[0-9;]*[mK]//g" | sed -r "s/\.\.\$$//" | tee ./output/example-avr.md
+	@bash -c 'simavr -m atmega328p -f 16000000 --no-color ./example-avr.elf 2>&1 >/dev/null \
+	  | sed -r "s/\x1B\[[0-9;]*[mK]//g" | sed -r "s/\.\.\$$//" | tee ./output/example-avr.md; \
+	  exit $${PIPESTATUS[0]}'
 
 .PHONY:
 %.o: %.c
 	$(CC) $(DEP_FLAG) $(CFLAGS) $(LDFLAGS) -o $@ -c $<
 
 .PHONY: test
-test: output/example-avr.md
-	@if grep -q "^FAIL:" output/example-avr.md; then \
-		echo "AVR unit tests FAILED:"; \
-		grep "^FAIL:" output/example-avr.md; \
-		exit 1; \
-	fi
-	@echo "All AVR unit tests passed."
+test: example-avr.elf
+	@echo "Running AVR unit tests under simavr..."
+	@bash -c 'simavr -m atmega328p -f 16000000 --no-color ./example-avr.elf 2>&1 >/dev/null \
+	  | sed -r "s/\x1B\[[0-9;]*[mK]//g" | sed -r "s/\.\.\$$//" \
+	  | grep -E "^(PASS|FAIL|##)"; \
+	  exit $${PIPESTATUS[0]}'
 
 .PHONY:
 clean:
