@@ -99,12 +99,27 @@ int main(void)
     check("fp y_to_x mid  SCALE=8",
           LINMAP_Y_TO_X_FIXED_POINT(SCALE_SAFE, 0, (int32_t)0, 1023, (int32_t)3300, (int32_t)1651), 512, 1);
 
-    /* --- Round-trip via adc_linmap.h helpers ----------------------------- */
+    /* --- Fast macros: multiply+shift only, no division ------------------- */
+    /* ADC_MILLIVOLT_FROM_VAL_FAST uses >>ADC_BIT_COUNT instead of /((1<<N)-1).
+     * Error < 0.13% vs exact; well within ADC noise. */
+    check("fast adc->mv zero",
+          ADC_MILLIVOLT_FROM_VAL_FAST(ADC_BIT_COUNT, MILLI_VOLT_REF, (int32_t)0), 0, 0);
+    check("fast adc->mv mid",
+          ADC_MILLIVOLT_FROM_VAL_FAST(ADC_BIT_COUNT, MILLI_VOLT_REF, (int32_t)512), 1650, 1);
+    check("fast adc->mv full",
+          ADC_MILLIVOLT_FROM_VAL_FAST(ADC_BIT_COUNT, MILLI_VOLT_REF, (int32_t)1023), 3296, 5);
+
+    check("fast mv->adc zero",
+          ADC_VAL_FROM_MILLIVOLT_FAST(ADC_BIT_COUNT, MILLI_VOLT_REF, (int32_t)0), 0, 0);
+    check("fast mv->adc mid",
+          ADC_VAL_FROM_MILLIVOLT_FAST(ADC_BIT_COUNT, MILLI_VOLT_REF, (int32_t)1651), 511, 2);
+
+    /* Round-trip: fast macros */
     {
         int32_t adc_in = 300;
-        int32_t mv     = ADC_MILLIVOLT_FROM_VAL_FIXED_POINT(SCALE_SAFE, ADC_BIT_COUNT, MILLI_VOLT_REF, adc_in);
-        int32_t adc_rt = ADC_VAL_FROM_MILLIVOLT_FIXED_POINT(SCALE_SAFE, ADC_BIT_COUNT, MILLI_VOLT_REF, mv);
-        check("round-trip adc->mv->adc SCALE=8", adc_rt, adc_in, 1);
+        int32_t mv     = ADC_MILLIVOLT_FROM_VAL_FAST(ADC_BIT_COUNT, MILLI_VOLT_REF, adc_in);
+        int32_t adc_rt = ADC_VAL_FROM_MILLIVOLT_FAST(ADC_BIT_COUNT, MILLI_VOLT_REF, mv);
+        check("fast round-trip adc->mv->adc", adc_rt, adc_in, 2);
     }
 
     /* --- Bug: fixed-point overflow at SCALE=10, max ADC value ------------ */
