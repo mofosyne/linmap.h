@@ -1,98 +1,162 @@
 /*
- * avr-example.c
- * Minimal single-file AVR test for LINMAP fixed-point conversions
- * Uses printf redirected to UART0
+ * example-avr.c
+ * AVR unit tests for linmap - run under simavr
+ *
+ * Uses simavr's command-register mechanism (SIMAVR_CMD_EXIT_CODE_0/1) so
+ * simavr exits with code 0 on pass or 1 on failure.  CI can check $? directly.
+ *
+ * Key bugs exposed by this test on AVR (sizeof(int)==2):
+ *  - Plain int overflow: (512 * 3300) = 1,689,600 overflows int16_t.
+ *    Fix: use int32_t/long literals, e.g. LINMAP_X_TO_Y(0, 0L, 1023, 3300L, x).
+ *  - Fixed-point overflow at SCALE=10: (1023 * 3300) << 10 = 3,456,921,600
+ *    exceeds INT32_MAX. Use SCALE<=8 for 10-bit ADC + 3300 mV, or widen to uint32_t.
  */
 
 #include "adc_linmap.h"
-
+#include "linmap.h"
+#include "simavr_cmd.h"
 #include <avr/io.h>
+#include <avr/sleep.h>
 #include <stdint.h>
 #include <stdio.h>
-#include <avr/sleep.h>
 
-/* -------- LINMAP MACROS (from your library) -------- */
+/* Declare GPIOR0 as the simavr command bridge (unused general-purpose IO reg) */
+SIMAVR_DECLARE_CMD_REG(&GPIOR0);
 
-#define ADC_BIT_COUNT 8
-#define MILLI_VOLT_REFERENCE 5000
-#define SCALING_FACTOR 8
-#define SAMPLE_COUNT 16
+/* 10-bit ADC, 3.3 V reference (matches desktop example) */
+#define ADC_BIT_COUNT   10
+#define MILLI_VOLT_REF  3300L
 
-/* -------- UART Setup -------- */
-void uart_init(void)
+/* SCALE=8:  max intermediate = (1023 * 3300) << 8  =   864,230,400 < INT32_MAX -- safe  */
+/* SCALE=10: max intermediate = (1023 * 3300) << 10 = 3,456,921,600 > INT32_MAX -- overflow */
+#define SCALE_SAFE       8
+#define SCALE_OVERFLOW  10
+
+/* ---- UART --------------------------------------------------------------- */
+static void uart_init(void)
 {
-    UBRR0 = 103;           // 16MHz / 16 / 9600 - 1
-    UCSR0B = (1 << TXEN0); // Enable transmitter
+    UBRR0 = 103; /* 16 MHz / 16 / 9600 - 1 */
+    UCSR0B = (1 << TXEN0);
 }
 
-int uart_putchar(char c, FILE *stream)
+static int uart_putchar(char c, FILE *stream)
 {
     if (c == '\n')
-        uart_putchar('\r', stream); // CRLF
+        uart_putchar('\r', stream);
     loop_until_bit_is_set(UCSR0A, UDRE0);
     UDR0 = c;
     return 0;
 }
 
-FILE uart_output = FDEV_SETUP_STREAM(uart_putchar, NULL, _FDEV_SETUP_WRITE);
+static FILE uart_output = FDEV_SETUP_STREAM(uart_putchar, NULL, _FDEV_SETUP_WRITE);
 
-/* -------- Main -------- */
+/* ---- Test framework ---------------------------------------------------- */
+static int failures = 0;
+
+static void check(const char *name, int32_t got, int32_t expected, int32_t tol)
+{
+    int32_t err = got - expected;
+    if (err < 0)
+        err = -err;
+    if (err <= tol)
+        printf("PASS: %s\n", name);
+    else {
+        printf("FAIL: %s  got=%ld expected=%ld\n", name, (long)got, (long)expected);
+        ++failures;
+    }
+}
+
+/* ---- Main -------------------------------------------------------------- */
 int main(void)
 {
-    stdout = &uart_output; // redirect printf to UART
+    stdout = &uart_output;
     uart_init();
 
-    printf("## Linear Conversion (AVR 8-bit e.g. atmega328p)\n\n");
-    printf("| ADC | Millivolt | ADC back | error |\n");
-    printf("|-----|-----------|----------|-------|\n");
-    for (int i = 0; i <= (1 << ADC_BIT_COUNT); i += 64)                                                                                                                     \
-    {
-        uint8_t adc_val = (int)i;
-        uint8_t millivolt_int = ADC_MILLIVOLT_FROM_VAL(ADC_BIT_COUNT, MILLI_VOLT_REFERENCE, adc_val);
-        uint8_t adc_from_mv_int = ADC_VAL_FROM_MILLIVOLT(ADC_BIT_COUNT, MILLI_VOLT_REFERENCE, millivolt_int);
-        int error = (int)adc_from_mv_int - (int)adc_val;
-        printf("| %3u | %9u | %8u | %5d |\n", adc_val, millivolt_int, adc_from_mv_int, error);
-    }
-    printf("\n\n");
+    printf("# linmap AVR unit tests\n\n");
+    printf("sizeof(int)=%u  sizeof(long)=%u\n\n",
+           (unsigned)sizeof(int), (unsigned)sizeof(long));
 
-    printf("## Fixed Linear Conversion (AVR 8-bit e.g. atmega328p)\n\n");
-    printf("| ADC | Millivolt | ADC back | error |\n");
-    printf("|-----|-----------|----------|-------|\n");
-    for (int i = 0; i <= (1 << ADC_BIT_COUNT); i += 64)                                                                                                                     \
-    {
-        uint8_t adc_val = (int)i;
-        uint8_t millivolt_fixed = ADC_MILLIVOLT_FROM_VAL_FIXED_POINT(SCALING_FACTOR, ADC_BIT_COUNT, MILLI_VOLT_REFERENCE, adc_val);
-        uint8_t adc_from_mv_fixed = ADC_VAL_FROM_MILLIVOLT_FIXED_POINT(SCALING_FACTOR, ADC_BIT_COUNT, MILLI_VOLT_REFERENCE, millivolt_fixed);
-        int error = (int)adc_from_mv_fixed - (int)adc_val;
-        printf("| %3u | %9u | %8u | %5d |\n", adc_val, millivolt_fixed, adc_from_mv_fixed, error);
-    }
-    printf("\n\n");
+    /* --- Basic correctness: explicit int32_t (long on AVR) --------------- */
+    check("x_to_y zero",
+          LINMAP_X_TO_Y(0, (int32_t)0, 1023, (int32_t)3300, (int32_t)0), 0, 0);
+    check("x_to_y mid",
+          LINMAP_X_TO_Y(0, (int32_t)0, 1023, (int32_t)3300, (int32_t)512), 1651, 1);
+    check("x_to_y full",
+          LINMAP_X_TO_Y(0, (int32_t)0, 1023, (int32_t)3300, (int32_t)1023), 3300, 0);
 
-    printf("## Floating Linear Conversion (AVR 32-bit Soft Float float e.g. atmega328p)\n\n");
-    printf("### ADC Value --> Millivolt --> ADC Value \n\n");
-    printf("| ADC Value  | Millivolts (float) | ADC From mV (int) | error  |\n");
-    printf("|------------|--------------------|-------------------|--------|\n");
-    for (int i = 0; i <= (1 << ADC_BIT_COUNT); i += 64)
-    {
-        float adc_val = (float)i;
-        float millivolt_float = ADC_MILLIVOLT_FROM_VAL(ADC_BIT_COUNT, (float)MILLI_VOLT_REFERENCE, (float)adc_val);
-        uint16_t adc_from_mv_int = ADC_VAL_FROM_MILLIVOLT(ADC_BIT_COUNT, MILLI_VOLT_REFERENCE, millivolt_float);
-        printf("| %10f | %15.2f mV | %17u | %6d |\n", adc_val, millivolt_float, adc_from_mv_int, adc_from_mv_int - adc_val);
-    }
-    printf("\n\n");
+    check("y_to_x zero",
+          LINMAP_Y_TO_X(0, (int32_t)0, 1023, (int32_t)3300, (int32_t)0), 0, 0);
+    check("y_to_x mid",
+          LINMAP_Y_TO_X(0, (int32_t)0, 1023, (int32_t)3300, (int32_t)1651), 512, 1);
+    check("y_to_x full",
+          LINMAP_Y_TO_X(0, (int32_t)0, 1023, (int32_t)3300, (int32_t)3300), 1023, 0);
 
-    printf("### Millivolt --> ADC Value --> Millivolt \n\n");
-    printf("| MV Value | ADC From mV (int) | Millivolts (float) | error  |\n");
-    printf("|----------|-------------------|--------------------|--------|\n");
-    for (int mv_val = 0; mv_val <= MILLI_VOLT_REFERENCE; mv_val += 100)
-    {
-        uint16_t adc_from_mv_int = ADC_VAL_FROM_MILLIVOLT(ADC_BIT_COUNT, MILLI_VOLT_REFERENCE, mv_val);
-        float millivolt_float = ADC_MILLIVOLT_FROM_VAL(ADC_BIT_COUNT, (float)MILLI_VOLT_REFERENCE, (float)adc_from_mv_int);
-        printf("| %5u mV | %17u | %15.2f mV | %6.2f |\n", mv_val, adc_from_mv_int, millivolt_float, millivolt_float - (float)mv_val);
-    }
-    printf("\n\n");
+    /* --- Fixed-point, SCALE=8 (safe for 10-bit ADC + 3300 mV) ----------- */
+    check("fp x_to_y mid  SCALE=8",
+          LINMAP_X_TO_Y_FIXED_POINT(SCALE_SAFE, 0, (int32_t)0, 1023, (int32_t)3300, (int32_t)512), 1651, 1);
+    check("fp x_to_y full SCALE=8",
+          LINMAP_X_TO_Y_FIXED_POINT(SCALE_SAFE, 0, (int32_t)0, 1023, (int32_t)3300, (int32_t)1023), 3300, 1);
+    check("fp y_to_x mid  SCALE=8",
+          LINMAP_Y_TO_X_FIXED_POINT(SCALE_SAFE, 0, (int32_t)0, 1023, (int32_t)3300, (int32_t)1651), 512, 1);
 
-	// this quits the simulator, since interrupts are off
-	// this is a "feature" that allows running tests cases and exit
-	sleep_cpu();
+    /* --- Fast macros: multiply+shift only, no division ------------------- */
+    /* ADC_MILLIVOLT_FROM_VAL_FAST uses >>ADC_BIT_COUNT instead of /((1<<N)-1).
+     * Error < 0.13% vs exact; well within ADC noise. */
+    check("fast adc->mv zero",
+          ADC_MILLIVOLT_FROM_VAL_FAST(ADC_BIT_COUNT, MILLI_VOLT_REF, (int32_t)0), 0, 0);
+    check("fast adc->mv mid",
+          ADC_MILLIVOLT_FROM_VAL_FAST(ADC_BIT_COUNT, MILLI_VOLT_REF, (int32_t)512), 1650, 1);
+    check("fast adc->mv full",
+          ADC_MILLIVOLT_FROM_VAL_FAST(ADC_BIT_COUNT, MILLI_VOLT_REF, (int32_t)1023), 3296, 5);
+
+    check("fast mv->adc zero",
+          ADC_VAL_FROM_MILLIVOLT_FAST(ADC_BIT_COUNT, MILLI_VOLT_REF, (int32_t)0), 0, 0);
+    check("fast mv->adc mid",
+          ADC_VAL_FROM_MILLIVOLT_FAST(ADC_BIT_COUNT, MILLI_VOLT_REF, (int32_t)1651), 511, 2);
+
+    /* Round-trip: fast macros */
+    {
+        int32_t adc_in = 300;
+        int32_t mv     = ADC_MILLIVOLT_FROM_VAL_FAST(ADC_BIT_COUNT, MILLI_VOLT_REF, adc_in);
+        int32_t adc_rt = ADC_VAL_FROM_MILLIVOLT_FAST(ADC_BIT_COUNT, MILLI_VOLT_REF, mv);
+        check("fast round-trip adc->mv->adc", adc_rt, adc_in, 2);
+    }
+
+    /* --- Known limitations (informational, not assertions) ---------------- */
+    /* SCALE=10 overflows int32_t at max ADC: (1023*3300)<<10 = 3.46G > INT32_MAX.
+     * Use _FAST (no division) or SCALE<=8 for 10-bit ADC + 3300 mV. */
+    {
+        int32_t got = LINMAP_X_TO_Y_FIXED_POINT(SCALE_OVERFLOW, 0, (int32_t)0, 1023, (int32_t)3300, (int32_t)1023);
+        printf("INFO: fp SCALE=10 at max  got=%ld expected=3300%s\n",
+               (long)got, got == 3300 ? "" : "  (int32_t overflow -- use _FAST or SCALE<=8)");
+    }
+
+    /* plain int is 16-bit on AVR: 512*3300 overflows int16.
+     * Use int32_t/long literals: LINMAP_X_TO_Y(0, 0L, 1023, 3300L, x). */
+    {
+        int got = LINMAP_X_TO_Y(0, 0, 1023, 3300, 512);
+        printf("INFO: plain int at mid  got=%d expected=1651%s\n",
+               got, got == 1651 ? "" : "  (int overflow -- sizeof(int)==2 here, use long literals)");
+    }
+
+    /* --- Demo table (for README) ---------------------------------------- */
+    printf("\n## Fixed-point conversion table (SCALE=%d, 10-bit ADC, 3300 mV ref)\n\n",
+           SCALE_SAFE);
+    printf("| ADC | mV (fp) | ADC back | error |\n");
+    printf("|-----|---------|----------|-------|\n");
+    for (int32_t i = 0; i <= (1 << ADC_BIT_COUNT); i += 64)
+    {
+        int32_t mv  = ADC_MILLIVOLT_FROM_VAL_FIXED_POINT(SCALE_SAFE, ADC_BIT_COUNT, MILLI_VOLT_REF, i);
+        int32_t rt  = ADC_VAL_FROM_MILLIVOLT_FIXED_POINT(SCALE_SAFE, ADC_BIT_COUNT, MILLI_VOLT_REF, mv);
+        printf("| %3ld | %7ld | %8ld | %5ld |\n", (long)i, (long)mv, (long)rt, (long)(rt - i));
+    }
+
+    printf("\n## Summary: %d failure(s)\n", failures);
+
+    /* Signal pass/fail to simavr via the command register, then halt.
+     * simavr exits with code 0 (EXIT_CODE_0) or 1 (EXIT_CODE_1) immediately
+     * on the register write; sleep_cpu() is the fallback for older simavr. */
+    GPIOR0 = failures ? SIMAVR_CMD_EXIT_CODE_1 : SIMAVR_CMD_EXIT_CODE_0;
+    sleep_cpu();
+    return 0;
 }
